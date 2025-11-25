@@ -1,6 +1,5 @@
-import json
-import sys
-import threading
+import random
+import sys, threading, os, base64
 from module.Login import LoginWindow
 from module.Listener import Listener
 from module.ChatArea import ChatArea
@@ -19,6 +18,9 @@ from qfluentwidgets import (setTheme, Theme, setThemeColor, TextEdit, PrimaryPus
 THEME_COLOR = '#0099FF'
 BUBBLE_SELF_COLOR = '#E5F5FF'  # 自己发送的气泡背景色
 BUBBLE_OTHER_COLOR = '#F2F2F2'  # 别人发送的气泡背景色
+# 接收文件保存地址
+SAVE_DIR = "downloads"
+
 
 class MainWindow(QWidget):
     closed = Signal()
@@ -44,6 +46,10 @@ class MainWindow(QWidget):
         # 聊天窗口缓存字典
         self.chat_windows = {}
 
+        #产生自己的头像
+        avatar_list = os.listdir('asset/')
+        self.avatar = 'asset/' + random.choice(avatar_list)
+
         self.sidebar.contactClicked.connect(self.switch_chat)
 
     def switch_chat(self, name):
@@ -55,10 +61,9 @@ class MainWindow(QWidget):
         # 切换显示
         self.stacked_widget.setCurrentWidget(target_widget)
 
-    def add_chatarea(self, name):
+    def add_chatarea(self, name, other_avatar='asset/w1.png'):
         if name not in self.chat_windows:
-            print(f"创建新窗口: {name}")
-            chat_area = ChatArea(chat_name=name)
+            chat_area = ChatArea(name, other_avatar, self.avatar)
             self.stacked_widget.addWidget(chat_area)
             self.chat_windows[name] = chat_area
             chat_area.sent.connect(self.send_msg)
@@ -74,8 +79,10 @@ class MainWindow(QWidget):
 
     def update_users(self, user, islog):
         if islog:
-            self.add_chatarea(user)
-            self.sidebar.add_user(user)
+            avatar_list = os.listdir('asset/')
+            avatar = 'asset/' + random.choice(avatar_list)
+            self.add_chatarea(user, avatar)
+            self.sidebar.add_user(user, avatar)
         else:
             if user in self.chat_windows.keys():
                 self.stacked_widget.removeWidget(self.chat_windows[user])
@@ -108,6 +115,8 @@ class Client(QObject):
             self.run()
 
     def init_main(self):
+        self.receiving_files = {} #接收文件的文件句柄
+
         self.Listener = Listener(self.ip, self.port, self.name)
         self.tread_receive = threading.Thread(target=self.Listener.receive_msg, args=(self.handle_receive,))
 
@@ -128,23 +137,82 @@ class Client(QObject):
         self.tread_receive.start()
         self.Window.show()
 
-    def handle_receive(self, data):
-        if data['type'] == 'text' or data['type'] == 'image':
-            self.msg_received.emit(data)
+    def handle_receive(self, msg):
+        if msg['type'] in ['text', 'image', 'file_header', 'file_chunk', 'file_finish']:
+            self.receive_msg(msg)
 
-        elif data['type'] == 'user_list':
+        elif msg['type'] == 'user_list':
             # 遍历列表，批量添加用户
-            for user in data['from_id']:
+            for user in msg['from_id']:
                 self.user_status_changed.emit(user, True)
 
-        elif data['type'] == 'login':
-            self.user_status_changed.emit(data['from_id'], True)
+        elif msg['type'] == 'login':
+            self.user_status_changed.emit(msg['from_id'], True)
 
-        elif data['type'] == 'logout':
-            self.user_status_changed.emit(data['from_id'], False)
+        elif msg['type'] == 'logout':
+            self.user_status_changed.emit(msg['from_id'], False)
 
     def send_msg(self, content, chat_name, chat_type):
         self.Listener.send_msg(content, chat_type, chat_name)
+
+    def receive_msg(self, msg: dict):
+        msg_type = msg.get('type')
+        from_id = msg.get('from_id')
+        filename = msg.get('filename')
+
+        file_key = filename
+        # 防止同名文件冲突
+        # if os.path.exists(f'downloads/{filename}'):
+        #     i = 1
+        #     while 1:
+        #         if not os.path.exists(f'downloads/{filename}'):
+        #             file_key = f"{filename}({i})"
+        #             break
+
+        # 收到文件头：准备接收
+        if msg_type == 'file_header':
+            print(f"开始接收文件: {filename}, 大小: {msg['filesize']}")
+
+            if not os.path.exists(SAVE_DIR):
+                os.makedirs(SAVE_DIR)
+            save_path = os.path.join(SAVE_DIR, filename)
+
+            try:
+                f = open(save_path, 'wb')
+                self.receiving_files[file_key] = f
+
+                # 显示文件接收气泡
+                msg['type'] = 'file'
+                msg['content'] = f'正在接收文件：{file_key}'
+                self.msg_received.emit(msg)
+
+            except Exception as e:
+                print(f"文件创建失败: {e}")
+
+        # 接收写入文件分片
+        elif msg_type == 'file_chunk':
+            if file_key in self.receiving_files:
+                f = self.receiving_files[file_key]
+                # 解码 Base64 并写入
+                try:
+                    chunk_data = base64.b64decode(msg['content'])
+                    f.write(chunk_data)
+                except Exception as e:
+                    print(f"写入分片失败: {e}")
+
+        # 收到文件结束
+        elif msg_type == 'file_finish':
+            if file_key in self.receiving_files:
+                f = self.receiving_files[file_key]
+                f.close()
+                del self.receiving_files[file_key]
+                msg['type'] = 'file'
+                msg['content'] = f'文件接收完成：{file_key}'
+                self.msg_received.emit(msg)
+                print(f"文件接收完成: {filename}")
+
+        elif msg_type in ['text', 'image']:
+            self.msg_received.emit(msg)
 
     def close(self):
         self.Listener.send_msg("", "logout", "All")

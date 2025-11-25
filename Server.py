@@ -1,7 +1,6 @@
 import socket
 import json
 import asyncio
-import time
 
 ###type: text, image, login, logout, user_list
 msg_template = """{
@@ -108,7 +107,7 @@ class Server:
             if current_user_name and current_user_name in self.users:
                 print(f"{current_user_name} disconnected")
                 self.users.pop(current_user_name)
-                # 构造登出消息广播
+
                 logout_msg = {'type': 'logout', 'from_id': current_user_name}
                 await self.broadcast(current_user_name, logout_msg, loop)
 
@@ -134,8 +133,9 @@ class Server:
             if current_user_name:
                 await self.broadcast(current_user_name, data, loop)
 
-        elif msg_type in ['text', 'image']:  # 支持图片类型转发
-            recipient_id = data.get('to_id')
+        elif msg_type in ['text', 'image', 'file_header', 'file_chunk', 'file_finish']:
+            recipient_id = data['to_id']
+            print(recipient_id)
             await self.send_to_user(recipient_id, data, loop)
 
     async def run(self):

@@ -1,4 +1,5 @@
 import base64
+import os
 
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QFrame, \
@@ -6,16 +7,19 @@ from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QL
 from qfluentwidgets import TextEdit, PrimaryPushButton, StrongBodyLabel, TransparentToolButton, FluentIcon
 from module.MessageBubble import MessageBubble
 
+
 class ChatArea(QWidget):
     """
     右侧聊天区域：包含消息列表和输入框
     """
-    sent = Signal(str, str, str)
+    sent = Signal(str, str, str)  # content, to_id, type
 
-    def __init__(self, chat_name, parent=None):
+    def __init__(self, chat_name, other_avatar, self_avatar, parent=None):
         super().__init__(parent)
         self.chat_name = chat_name
         self.chat_type = ''
+        self.other_avatar = other_avatar
+        self.self_avatar = self_avatar
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -48,6 +52,7 @@ class ChatArea(QWidget):
                     QListWidget::item {
                         background-color: transparent;
                         border: none; 
+                        padding: 0px;
                     }
                     QListWidget::item:hover, 
                     QListWidget::item:selected {
@@ -64,10 +69,18 @@ class ChatArea(QWidget):
         input_layout = QVBoxLayout(self.input_container)
         input_layout.setContentsMargins(10, 10, 10, 10)
 
+        # 工具栏区域
+        # 图片选择按钮
         tool_layout = QHBoxLayout()
-        self.img_btn = TransparentToolButton(FluentIcon.PHOTO, self)  # 换个图标
-        self.img_btn.clicked.connect(self.select_image)  # 连接槽函数
-        tool_layout.insertWidget(0, self.img_btn)  # 插入到第一个
+        self.img_btn = TransparentToolButton(FluentIcon.PHOTO, self)
+        self.img_btn.clicked.connect(self.select_image)
+        tool_layout.addWidget(self.img_btn)
+        # 文件选择按钮
+        self.file_btn = TransparentToolButton(FluentIcon.DOCUMENT, self)
+        self.file_btn.setToolTip("发送文件")
+        self.file_btn.clicked.connect(self.select_file)
+        tool_layout.addWidget(self.file_btn)
+
         tool_layout.addStretch(1)
         input_layout.addLayout(tool_layout)
 
@@ -90,9 +103,9 @@ class ChatArea(QWidget):
 
     def add_message(self, content, is_me=True, msg_type='text'):
         item = QListWidgetItem()
-        widget = MessageBubble(content, is_me, msg_type)
+        widget = MessageBubble(content, self.self_avatar if is_me else self.other_avatar, is_me, msg_type)
 
-        item.setSizeHint(QSize(0, widget.sizeHint().height() + 20))
+        item.setSizeHint(QSize(0, widget.sizeHint().height() + 4))
         self.message_list.addItem(item)
         self.message_list.setItemWidget(item, widget)
         self.message_list.scrollToBottom()
@@ -112,15 +125,23 @@ class ChatArea(QWidget):
             self, "选择图片", "", "Images (*.png *.jpg *.jpeg *.bmp)"
         )
         if file_path:
-            # 1. 读取文件并转 Base64
+            # 读取文件并转 Base64
             with open(file_path, 'rb') as f:
                 img_data = f.read()
-                # 转为 base64 字符串
                 base64_str = base64.b64encode(img_data).decode('utf-8')
 
-            # 2. 界面上显示图片 (is_me=True, type='image')
+            # 显示图片
             self.add_message(base64_str, is_me=True, msg_type='image')
 
-            # 3. 发送信号给 MainWindow -> Client -> Listener
-            # content 是 base64 字符串， type 是 'image'
+            # 发送信号MainWindow -> Client -> Listener
             self.sent.emit(base64_str, self.chat_name, 'image')
+
+    def select_file(self):
+        """选择并发送文件"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择文件", "", "All Files (*)"
+        )
+        if file_path:
+            filename = os.path.basename(file_path)
+            self.add_message(f"发送: {filename}", is_me=True, msg_type='file')
+            self.sent.emit(file_path, self.chat_name, 'file')

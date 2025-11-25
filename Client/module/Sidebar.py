@@ -88,10 +88,10 @@ class Sidebar(QWidget):
         layout.addWidget(self.user_list, 1)
         layout.addStretch(1)  # 底部顶上去
 
-    def add_user(self, name):
+    def add_user(self, name, avatar):
         item = QListWidgetItem(name)
         item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        item.setIcon(QIcon('asset/w1.png'))
+        item.setIcon(QIcon(avatar))
         self.user_list.add_user(item)
 
     def remove_user(self, name):
