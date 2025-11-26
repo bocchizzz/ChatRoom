@@ -13,12 +13,16 @@ class SystemMessageLabel(BodyLabel):
     def __init__(self, text):
         super().__init__()
         font = self.font()
-        font.setPixelSize(14)
+        font.setPixelSize(12)
         self.setFont(font)
-        self.setMaximumSize(200, 30)
+        self.setMinimumSize(150, 25)
+        self.setMaximumWidth(400)
+        self.setContentsMargins(20, 8, 20, 8)
+        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
         self.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+        self.setWordWrap(True)
         self.setText(text)
-        self.setStyleSheet("background-color: rgba(100, 100, 100, 50); border-radius: 10px")
+        self.setStyleSheet("background-color: rgba(150, 150, 150, 50); border-radius: 15px")
 
 
 class MessageBubble(QWidget):

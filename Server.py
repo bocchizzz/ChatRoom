@@ -127,7 +127,7 @@ class Server:
             # 广播登录
             await self.broadcast(client_name, data, loop)
             # 发送在线列表给自己
-            await self.get_allusers(client_sock, loop, client_name)
+            # await self.get_allusers(client_sock, loop, client_name)
 
         elif msg_type == 'logout':
             if current_user_name:
@@ -135,7 +135,6 @@ class Server:
 
         elif msg_type in ['text', 'image', 'file_header', 'file_chunk', 'file_finish']:
             recipient_id = data['to_id']
-            print(recipient_id)
             await self.send_to_user(recipient_id, data, loop)
 
     async def run(self):
@@ -145,6 +144,7 @@ class Server:
             client_sock, addr = await loop.sock_accept(self.server)
             print(f"Connection from {addr}")
             client_sock.setblocking(False)
+            await self.get_allusers(client_sock, loop, '')
             loop.create_task(self.handle(client_sock, loop))
 
 

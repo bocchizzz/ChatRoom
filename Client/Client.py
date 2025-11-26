@@ -46,11 +46,19 @@ class MainWindow(QWidget):
         # 聊天窗口缓存字典
         self.chat_windows = {}
 
-        #产生自己的头像
+        # 产生自己的头像
         avatar_list = os.listdir('asset/')
         self.avatar = 'asset/' + random.choice(avatar_list)
 
         self.sidebar.contactClicked.connect(self.switch_chat)
+
+        # self.log_in()
+
+    def log_in(self, online_users):
+        log_window = LoginWindow(online_users, self)
+        # log_window.show()
+        if log_window.exec():
+            return log_window.textEdit.text()
 
     def switch_chat(self, name):
         # 聊天窗口还没创建过
@@ -104,18 +112,10 @@ class Client(QObject):
         self.ip = ip
         self.port = port
         self.name = ''
-        self.Window = LoginWindow()
-        self.Window.show()
-        self.Window.closed.connect(self.login)
 
-    def login(self, name, log):
-        if log:
-            self.name = name
-            self.init_main()
-            self.run()
-
-    def init_main(self):
-        self.receiving_files = {} #接收文件的文件句柄
+        self.receiving_files = {}  # 接收文件的文件句柄
+        self.online_users: set = set()  # 存储在线用户，主要防止重名
+        self.online_room: set = set()  # 存储在线群聊，主要防止重名
 
         self.Listener = Listener(self.ip, self.port, self.name)
         self.tread_receive = threading.Thread(target=self.Listener.receive_msg, args=(self.handle_receive,))
@@ -128,14 +128,24 @@ class Client(QObject):
         self.Window.closed.connect(self.close)
         self.Window.sent.connect(self.send_msg)
 
+        self.Listener.file_finished.connect(self.finished_send_file)
+
         # 当 msg_received 发射时，主线程会自动执行 self.Window.display_msg
         self.msg_received.connect(self.Window.display_msg)
         # 当 user_status_changed 发射时，主线程会自动执行 self.Window.update_users
         self.user_status_changed.connect(self.Window.update_users)
 
+
     def run(self):
         self.tread_receive.start()
         self.Window.show()
+        name = self.Window.log_in(self.online_users)
+        if name:
+            self.name = name
+            self.Listener.send_login(name)
+        else:
+            self.Window.close()
+
 
     def handle_receive(self, msg):
         if msg['type'] in ['text', 'image', 'file_header', 'file_chunk', 'file_finish']:
@@ -145,12 +155,15 @@ class Client(QObject):
             # 遍历列表，批量添加用户
             for user in msg['from_id']:
                 self.user_status_changed.emit(user, True)
+                self.online_users.add(user)
 
         elif msg['type'] == 'login':
             self.user_status_changed.emit(msg['from_id'], True)
+            self.online_users.add(msg['from_id'])
 
         elif msg['type'] == 'logout':
             self.user_status_changed.emit(msg['from_id'], False)
+            self.online_users.remove(msg['from_id'])
 
     def send_msg(self, content, chat_name, chat_type):
         self.Listener.send_msg(content, chat_type, chat_name)
@@ -214,6 +227,10 @@ class Client(QObject):
         elif msg_type in ['text', 'image']:
             self.msg_received.emit(msg)
 
+    def finished_send_file(self, filename, to_id):
+        print(to_id)
+        self.Window.chat_windows[to_id].add_message(f"发送完成: {filename}", is_me=True, msg_type='file')
+
     def close(self):
         self.Listener.send_msg("", "logout", "All")
         self.Listener.close()
@@ -224,5 +241,6 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     client = Client('localhost', 8888)
+    client.run()
 
     sys.exit(app.exec())

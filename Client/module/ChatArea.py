@@ -143,5 +143,5 @@ class ChatArea(QWidget):
         )
         if file_path:
             filename = os.path.basename(file_path)
-            self.add_message(f"发送: {filename}", is_me=True, msg_type='file')
+            self.add_message(f"正在发送: {filename}", is_me=True, msg_type='file')
             self.sent.emit(file_path, self.chat_name, 'file')

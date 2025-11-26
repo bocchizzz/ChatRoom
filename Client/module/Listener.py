@@ -1,9 +1,10 @@
 import base64
 import os, socket, json, threading
-from PySide6.QtCore import QThread
+from PySide6.QtCore import QThread, Signal, QObject
 
 msg_template = """{
-    "type": "message",
+    "type": "message", 
+    "private": false,
     "from_id": "UserA", 
     "to_id": "UserB",
     "content": ""
@@ -11,6 +12,8 @@ msg_template = """{
 
 
 class SendWorker(QThread):
+    finished = Signal(str, str)
+
     def __init__(self, sock, lock, file_path, to_id, from_id):
         super().__init__()
         self.sock = sock
@@ -19,7 +22,6 @@ class SendWorker(QThread):
         self.to_id = to_id
         self.from_id = from_id
         self.chunk_size = 512 * 1024  # 512KB 分片大小
-        print(file_path)
 
     def run(self):
         try:
@@ -76,6 +78,7 @@ class SendWorker(QThread):
                 'from_id': self.from_id
             }
             self.send_safe(finish_msg)
+            self.finished.emit(file_name, self.to_id)
 
 
         except Exception as e:
@@ -88,17 +91,24 @@ class SendWorker(QThread):
         with self.lock:
             self.sock.send(json_bytes)
 
-class Listener:
+
+class Listener(QObject):
+    file_finished = Signal(str, str)
+
     def __init__(self, ip, port, name):
+        super().__init__()
         self.name = name
         self.isrun = True
         self.listener = socket.socket()
         self.listener.connect((ip, port))
         self.send_lock = threading.Lock()
-        # 登录
-        self.send_msg(to_id="All", msg_type="login", content="")
+
         self.worker = None
 
+    def send_login(self, name):
+        # 登录
+        self.name = name
+        self.send_msg(to_id="All", msg_type="login", content="")
 
     def receive_msg(self, handle_func):
         decoder = json.JSONDecoder()
@@ -149,9 +159,7 @@ class Listener:
                 self.name
             )
 
-            # self.worker.progress_signal.connect(self.file_progress)
-            # self.worker.finished_signal.connect(self.file_finished)
-            # self.worker.error_signal.connect(lambda e: print(f"File Send Error: {e}"))
+            self.worker.finished.connect(self.file_finished.emit)
 
             # 启动线程
             self.worker.start()
