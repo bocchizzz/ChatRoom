@@ -4,6 +4,7 @@ from module.Login import LoginWindow
 from module.Listener import Listener
 from module.ChatArea import ChatArea
 from module.Sidebar import Sidebar
+from module.Room import CreateRoom
 from PySide6.QtCore import Qt, QSize, Signal, QObject
 from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout,
@@ -24,7 +25,8 @@ SAVE_DIR = "downloads"
 
 class MainWindow(QWidget):
     closed = Signal()
-    sent = Signal(str, str, str)
+    sent = Signal(str, str, str, bool)
+    createRoom = Signal()
 
     def __init__(self):
         super().__init__()
@@ -44,46 +46,61 @@ class MainWindow(QWidget):
         self.h_layout.addWidget(self.stacked_widget)
 
         # 聊天窗口缓存字典
-        self.chat_windows = {}
+        self.user_chat_windows = {}
+        self.room_chat_windows = {}
 
         # 产生自己的头像
         avatar_list = os.listdir('asset/')
         self.avatar = 'asset/' + random.choice(avatar_list)
 
-        self.sidebar.contactClicked.connect(self.switch_chat)
-
-        # self.log_in()
+        self.sidebar.userClicked.connect(self.switch_chat)
+        self.sidebar.roomClicked.connect(self.switch_chat)
+        self.sidebar.creatRoom.connect(self.createRoom.emit)
 
     def log_in(self, online_users):
         log_window = LoginWindow(online_users, self)
-        # log_window.show()
         if log_window.exec():
             return log_window.textEdit.text()
 
-    def switch_chat(self, name):
+    def switch_chat(self, name, isroom):
         # 聊天窗口还没创建过
         self.add_chatarea(name)
-
-        target_widget = self.chat_windows[name]
+        if isroom:
+            target_widget = self.room_chat_windows[name]
+        else:
+            target_widget = self.user_chat_windows[name]
 
         # 切换显示
         self.stacked_widget.setCurrentWidget(target_widget)
 
     def add_chatarea(self, name, other_avatar='asset/w1.png'):
-        if name not in self.chat_windows:
+        if name not in self.user_chat_windows:
             chat_area = ChatArea(name, other_avatar, self.avatar)
             self.stacked_widget.addWidget(chat_area)
-            self.chat_windows[name] = chat_area
+            self.user_chat_windows[name] = chat_area
             chat_area.sent.connect(self.send_msg)
 
-    def send_msg(self, text, chat_name, chat_type):
-        self.sent.emit(text, chat_name, chat_type)
+    def add_room_chatarea(self, name, other_avatar='asset/w1.png'):
+        if name not in self.room_chat_windows:
+            chat_area = ChatArea(name, other_avatar, self.avatar, isroom=True)
+            self.stacked_widget.addWidget(chat_area)
+            self.room_chat_windows[name] = chat_area
+            chat_area.sent.connect(self.send_msg)
 
-    def display_msg(self, message):
-        if message['from_id'] in self.chat_windows:
-            chat_area = self.chat_windows[message['from_id']]
-            msg_type = message['type']
-            chat_area.add_message(message['content'], is_me=False, msg_type=msg_type)
+    def send_msg(self, text, chat_name, chat_type, is_private):
+        self.sent.emit(text, chat_name, chat_type, is_private)
+
+    def display_msg(self, message, isroom):
+        if isroom:
+            if message['to_id'] in self.room_chat_windows.keys():
+                chat_area = self.room_chat_windows[message['to_id']]
+                msg_type = message['type']
+                chat_area.add_message(message['content'], message['from_id'], is_me=False, msg_type=msg_type)
+        else:
+            if message['from_id'] in self.user_chat_windows.keys():
+                chat_area = self.user_chat_windows[message['from_id']]
+                msg_type = message['type']
+                chat_area.add_message(message['content'], message['from_id'], is_me=False, msg_type=msg_type)
 
     def update_users(self, user, islog):
         if islog:
@@ -92,10 +109,19 @@ class MainWindow(QWidget):
             self.add_chatarea(user, avatar)
             self.sidebar.add_user(user, avatar)
         else:
-            if user in self.chat_windows.keys():
-                self.stacked_widget.removeWidget(self.chat_windows[user])
-                self.chat_windows.pop(user)
+            if user in self.user_chat_windows.keys():
+                self.stacked_widget.removeWidget(self.user_chat_windows[user])
+                self.user_chat_windows.pop(user)
             self.sidebar.remove_user(user)
+
+    def update_rooms(self, room_name):
+        self.sidebar.add_room(room_name)
+        self.add_room_chatarea(room_name)
+
+    def create_room_box(self, user, room):
+        create_room_box = CreateRoom(room, user, self)
+        if create_room_box.exec():
+            return create_room_box.room_info
 
     def closeEvent(self, event):
         self.closed.emit()
@@ -103,9 +129,10 @@ class MainWindow(QWidget):
 
 class Client(QObject):
     # 用于接收消息的信号，参数类型为 dict
-    msg_received = Signal(dict)
+    msg_received = Signal(dict, bool)
     # 用于用户登录/登出的信号，参数类型为 str(用户名), bool(是否登录)
     user_status_changed = Signal(str, bool)
+    room_status_changed = Signal(str)
 
     def __init__(self, ip, port):
         super().__init__()
@@ -115,7 +142,7 @@ class Client(QObject):
 
         self.receiving_files = {}  # 接收文件的文件句柄
         self.online_users: set = set()  # 存储在线用户，主要防止重名
-        self.online_room: set = set()  # 存储在线群聊，主要防止重名
+        self.online_rooms: set = set()  # 存储在线群聊，主要防止重名
 
         self.Listener = Listener(self.ip, self.port, self.name)
         self.tread_receive = threading.Thread(target=self.Listener.receive_msg, args=(self.handle_receive,))
@@ -127,6 +154,7 @@ class Client(QObject):
 
         self.Window.closed.connect(self.close)
         self.Window.sent.connect(self.send_msg)
+        self.Window.createRoom.connect(self.create_room)
 
         self.Listener.file_finished.connect(self.finished_send_file)
 
@@ -134,6 +162,8 @@ class Client(QObject):
         self.msg_received.connect(self.Window.display_msg)
         # 当 user_status_changed 发射时，主线程会自动执行 self.Window.update_users
         self.user_status_changed.connect(self.Window.update_users)
+        # 当 user_status_changed 发射时，主线程会自动执行 self.Window.update_room
+        self.room_status_changed.connect(self.Window.update_rooms)
 
 
     def run(self):
@@ -165,13 +195,17 @@ class Client(QObject):
             self.user_status_changed.emit(msg['from_id'], False)
             self.online_users.remove(msg['from_id'])
 
-    def send_msg(self, content, chat_name, chat_type):
-        self.Listener.send_msg(content, chat_type, chat_name)
+        elif msg['type'] == 'join_room':
+            self.room_status_changed.emit(msg['content'])
+
+    def send_msg(self, content, chat_name, chat_type, is_private):
+        self.Listener.send_msg(content, chat_type, chat_name, not is_private)
 
     def receive_msg(self, msg: dict):
         msg_type = msg.get('type')
         from_id = msg.get('from_id')
         filename = msg.get('filename')
+        isroom = not msg.get('private')
 
         file_key = filename
         # 防止同名文件冲突
@@ -197,7 +231,7 @@ class Client(QObject):
                 # 显示文件接收气泡
                 msg['type'] = 'file'
                 msg['content'] = f'正在接收文件：{file_key}'
-                self.msg_received.emit(msg)
+                self.msg_received.emit(msg, isroom)
 
             except Exception as e:
                 print(f"文件创建失败: {e}")
@@ -221,15 +255,23 @@ class Client(QObject):
                 del self.receiving_files[file_key]
                 msg['type'] = 'file'
                 msg['content'] = f'文件接收完成：{file_key}'
-                self.msg_received.emit(msg)
+                self.msg_received.emit(msg, isroom)
                 print(f"文件接收完成: {filename}")
 
         elif msg_type in ['text', 'image']:
-            self.msg_received.emit(msg)
+            self.msg_received.emit(msg, isroom)
 
-    def finished_send_file(self, filename, to_id):
-        print(to_id)
-        self.Window.chat_windows[to_id].add_message(f"发送完成: {filename}", is_me=True, msg_type='file')
+    def create_room(self):
+        room_info = self.Window.create_room_box(self.online_users, self.online_rooms)
+        if room_info:
+            room_info['users'].append(self.name)
+            self.Listener.send_msg(room_info['name'], 'create_room', room_info['users'])
+
+    def finished_send_file(self, filename, to_id, is_private):
+        if is_private:
+            self.Window.user_chat_windows[to_id].add_message(f"发送完成: {filename}", is_me=True, msg_type='file')
+        else:
+            self.Window.room_chat_windows[to_id].add_message(f"发送完成: {filename}", is_me=True, msg_type='file')
 
     def close(self):
         self.Listener.send_msg("", "logout", "All")

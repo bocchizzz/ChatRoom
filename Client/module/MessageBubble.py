@@ -2,7 +2,7 @@ import base64
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QFrame, QLabel, QSizePolicy
-from qfluentwidgets import BodyLabel, AvatarWidget, FluentIcon, IconWidget
+from qfluentwidgets import BodyLabel, AvatarWidget, FluentIcon, IconWidget, TitleLabel
 
 THEME_COLOR = '#0099FF'
 BUBBLE_SELF_COLOR = '#E5F5FF'  # 自己发送的气泡背景色
@@ -15,7 +15,7 @@ class SystemMessageLabel(BodyLabel):
         font = self.font()
         font.setPixelSize(12)
         self.setFont(font)
-        self.setMinimumSize(150, 25)
+        self.setMinimumSize(100, 25)
         self.setMaximumWidth(400)
         self.setContentsMargins(20, 8, 20, 8)
         self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
@@ -26,7 +26,7 @@ class SystemMessageLabel(BodyLabel):
 
 
 class MessageBubble(QWidget):
-    def __init__(self, content, avatar, is_me=False, msg_type='text', parent=None):
+    def __init__(self, content, avatar, name, is_me=False, is_room=False, msg_type='text', parent=None):
         super().__init__(parent)
         self.is_me = is_me
 
@@ -34,10 +34,12 @@ class MessageBubble(QWidget):
         layout.setContentsMargins(10, 5, 10, 5)
 
         self.avatar = AvatarWidget()
+        self.avatar.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
         self.avatar.setImage(avatar)
-        self.avatar.setFixedSize(50, 50)
-        self.avatar.setMaximumSize(50, 50)
+        self.avatar.setFixedSize(60, 60)
+
         avatar_layout = QVBoxLayout()
+
         avatar_layout.addWidget(self.avatar)
         avatar_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
         avatar_layout.addStretch(1)
@@ -45,6 +47,18 @@ class MessageBubble(QWidget):
         self.bubble_container = QFrame()
         self.bubble_layout = QVBoxLayout(self.bubble_container)
         self.bubble_layout.setContentsMargins(8, 4, 8, 4)
+
+        self.name_bubble_layout = QVBoxLayout()
+        # 判断是否为房间消息，如果是则聊天气泡带上发送方的名字
+        if is_room and not is_me:
+            name_label = TitleLabel(name)
+            name_label.setAlignment(Qt.AlignmentFlag.AlignTop| Qt.AlignmentFlag.AlignLeft)
+            font = name_label.font()
+            font.setPixelSize(10)
+            name_label.setFont(font)
+            self.name_bubble_layout.addWidget(name_label, 0.1)
+        self.name_bubble_layout.addWidget(self.bubble_container, 1)
+        # self.name_bubble_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
 
         if msg_type == 'file':
             self.content_widget = SystemMessageLabel(content)
@@ -76,7 +90,6 @@ class MessageBubble(QWidget):
                 self.content_widget = BodyLabel(content)
                 self.content_widget.setMaximumWidth(400)
                 self.content_widget.setMinimumHeight(0)
-                # self.content_widget.setMaximumHeight(10)
                 self.content_widget.setWordWrap(True)
                 self.content_widget.setTextInteractionFlags(Qt.TextSelectableByMouse)
                 self.content_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
@@ -91,7 +104,8 @@ class MessageBubble(QWidget):
             # 判断是自己发送的消息还是接收的消息
             if is_me:
                 layout.addStretch(1)
-                layout.addWidget(self.bubble_container)
+                layout.addLayout(self.name_bubble_layout)
+                self.name_bubble_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
                 layout.addSpacing(8)
                 layout.addLayout(avatar_layout)
 
@@ -105,7 +119,8 @@ class MessageBubble(QWidget):
             else:
                 layout.addLayout(avatar_layout)
                 layout.addSpacing(8)
-                layout.addWidget(self.bubble_container)
+                layout.addLayout(self.name_bubble_layout)
+                self.name_bubble_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
                 layout.addStretch(1)
 
                 self.bubble_container.setStyleSheet(f"""

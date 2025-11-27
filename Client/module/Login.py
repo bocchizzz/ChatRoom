@@ -29,34 +29,3 @@ class LoginWindow(MessageBoxBase):
         isvalid = (not self.textEdit.text() in self.online_users) and (self.textEdit.text() != '')
         self.waring_label.setHidden(isvalid)
         return isvalid
-
-
-        # self.butn_confirm = PushButton()
-        # self.butn_confirm.setText("确定")
-        #
-        # self.butn_cancel = PushButton()
-        # self.butn_cancel.setText("取消")
-        #
-        # v = QVBoxLayout()
-        # v.addWidget(self.title, 1)
-        # v.addWidget(self.textEdit, 2)
-        # h = QHBoxLayout()
-        # h.addWidget(self.butn_confirm)
-        # h.addWidget(self.butn_cancel)
-        # v.addLayout(h, 1)
-        # self.setLayout(v)
-        #
-        # self.setMaximumSize(300, 160)
-        # self.setMinimumSize(300, 160)
-        #
-        # self.butn_confirm.clicked.connect(self.confirm)
-        # self.butn_cancel.clicked.connect(self.cancel)
-
-    # def confirm(self):
-    #     if self.textEdit.text():
-    #         self.closed.emit(self.textEdit.text(), True)
-    #         self.close()
-    #
-    # def cancel(self):
-    #     self.closed.emit("", False)
-    #     self.close()

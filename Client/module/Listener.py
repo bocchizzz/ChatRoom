@@ -12,15 +12,16 @@ msg_template = """{
 
 
 class SendWorker(QThread):
-    finished = Signal(str, str)
+    finished = Signal(str, str, bool)
 
-    def __init__(self, sock, lock, file_path, to_id, from_id):
+    def __init__(self, sock, lock, file_path, to_id, from_id, is_private):
         super().__init__()
         self.sock = sock
         self.lock = lock  # 接收共享锁
         self.file_path = file_path
         self.to_id = to_id
         self.from_id = from_id
+        self.is_private = is_private
         self.chunk_size = 512 * 1024  # 512KB 分片大小
 
     def run(self):
@@ -36,6 +37,7 @@ class SendWorker(QThread):
                 'type': 'file_header',
                 'to_id': self.to_id,
                 'from_id': self.from_id,
+                'private': self.is_private,
                 'filename': file_name,
                 'filesize': file_size,
             }
@@ -54,6 +56,7 @@ class SendWorker(QThread):
                         'type': 'file_chunk',
                         'to_id': self.to_id,
                         'from_id': self.from_id,
+                        'private': self.is_private,
                         'content': b64_str,
                         'filename': file_name
                     }
@@ -74,15 +77,16 @@ class SendWorker(QThread):
             finish_msg = {
                 'type': 'file_finish',
                 'filename': file_name,
+                'private': self.is_private,
                 'to_id': self.to_id,
                 'from_id': self.from_id
             }
             self.send_safe(finish_msg)
-            self.finished.emit(file_name, self.to_id)
-
+            self.finished.emit(file_name, self.to_id, self.is_private)
 
         except Exception as e:
             print(str(e))
+            return
 
     def send_safe(self, data):
         """线程安全的发送辅助函数"""
@@ -93,7 +97,7 @@ class SendWorker(QThread):
 
 
 class Listener(QObject):
-    file_finished = Signal(str, str)
+    file_finished = Signal(str, str, bool)
 
     def __init__(self, ip, port, name):
         super().__init__()
@@ -145,7 +149,7 @@ class Listener(QObject):
 
         print("stop")
 
-    def send_msg(self, content, msg_type, to_id):
+    def send_msg(self, content, msg_type, to_id, is_private=True):
         if msg_type == 'file':
             if not content:
                 print("Error: Send file but no path provided.")
@@ -156,22 +160,22 @@ class Listener(QObject):
                 self.send_lock,
                 content,
                 to_id,
-                self.name
+                self.name,
+                is_private
             )
 
             self.worker.finished.connect(self.file_finished.emit)
 
             # 启动线程
             self.worker.start()
-            print(f"后台发送线程已启动: {content}")
 
         else:
-            msg = {
-                'type': msg_type,
-                'content': content,
-                'to_id': to_id,
-                'from_id': self.name
-            }
+            msg = json.loads(msg_template)
+            msg['type'] = msg_type
+            msg['content'] = content
+            msg['to_id'] = to_id
+            msg['from_id'] = self.name
+            msg['private'] = is_private
 
             try:
                 json_bytes = json.dumps(msg).encode('utf-8')

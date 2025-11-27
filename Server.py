@@ -2,7 +2,7 @@ import socket
 import json
 import asyncio
 
-###type: text, image, login, logout, user_list
+###type: text, image, login, logout, user_list, create_room, join_room
 msg_template = """{
     "type": "message", 
     "private": false,
@@ -15,7 +15,8 @@ msg_template = """{
 class Room:
     def __init__(self, name, creator):
         self.name: str = name
-        self.users: dict = {}
+        self.users: set = set()
+        self.creator = creator
 
     # def Add(self, user: User):
     #     self.users.append(user)
@@ -27,12 +28,14 @@ class Room:
 class Server:
     def __init__(self, ip, port, max_user):
         self.users: dict = {}
+        self.rooms: dict[str, Room] = {}
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.bind((ip, port))
         self.server.listen(max_user)
         self.server.setblocking(False)
+        self.loop: asyncio.AbstractEventLoop
 
-    async def broadcast(self, client_name, data_dict, loop):
+    async def broadcast(self, client_name, data_dict):
         """
         广播消息
         """
@@ -40,32 +43,41 @@ class Server:
         for name, conn in self.users.items():
             if name != client_name:
                 try:
-                    await loop.sock_sendall(conn, bytes_data)
+                    await self.loop.sock_sendall(conn, bytes_data)
                 except Exception as e:
                     print(f"Broadcast error to {name}: {e}")
 
-    async def send_to_user(self, to_id, data_dict, loop):
+    async def send_to_user(self, to_id, msg):
         """发送给指定用户"""
         if to_id in self.users:
-            bytes_data = json.dumps(data_dict).encode('utf-8')
+            bytes_data = json.dumps(msg).encode('utf-8')
             try:
-                await loop.sock_sendall(self.users[to_id], bytes_data)
+                await self.loop.sock_sendall(self.users[to_id], bytes_data)
             except Exception as e:
                 print(f"Send error to {to_id}: {e}")
 
-    async def get_allusers(self, sock, loop, client_name):
+    async def join_room(self, room_name, user, inviter):
+        msg = json.loads(msg_template)
+        msg['type'] = 'join_room'
+        msg['to_id'] = user
+        msg['from_id'] = inviter
+        msg['content'] = room_name
+        self.rooms[room_name].users.add(user)
+        await self.send_to_user(user, msg)
+
+    async def get_allusers(self, sock, client_name):
         online_users = [name for name in self.users.keys() if name != client_name]
 
         if online_users:
             data = json.loads(msg_template)
             data['type'] = 'user_list'
             data['to_id'] = client_name
-            data['from_id'] = online_users  # 注意这里 key 最好叫 user_list 配合客户端
+            data['from_id'] = online_users
 
             raw_data = json.dumps(data).encode('utf-8')
-            await loop.sock_sendall(sock, raw_data)
+            await self.loop.sock_sendall(sock, raw_data)
 
-    async def handle(self, client_sock, loop):
+    async def handle(self, client_sock):
         buffer = ""
         decoder = json.JSONDecoder()
         current_user_name = None  # 记录当前连接的用户名
@@ -73,7 +85,7 @@ class Server:
         try:
             while True:
                 # 接收数据块
-                raw_chunk = await loop.sock_recv(client_sock, 4096)  # 加大接收缓冲区
+                raw_chunk = await self.loop.sock_recv(client_sock, 4096)
                 if not raw_chunk:
                     break
 
@@ -90,7 +102,7 @@ class Server:
                     try:
                         data, idx = decoder.raw_decode(buffer)
 
-                        await self.process_message(data, client_sock, loop, current_user_name)
+                        await self.process_message(data, client_sock, current_user_name)
 
                         if data.get('type') == 'login':
                             current_user_name = data['from_id']
@@ -109,43 +121,56 @@ class Server:
                 self.users.pop(current_user_name)
 
                 logout_msg = {'type': 'logout', 'from_id': current_user_name}
-                await self.broadcast(current_user_name, logout_msg, loop)
+                await self.broadcast(current_user_name, logout_msg)
 
             client_sock.close()
 
-    async def process_message(self, data, client_sock, loop, current_user_name):
+    async def process_message(self, msg, client_sock, current_user_name):
         """
         处理单条完整的 JSON 消息
         """
-        msg_type = data.get('type')
+        msg_type = msg.get('type')
 
         if msg_type == 'login':
-            client_name = data['from_id']
+            client_name = msg['from_id']
             self.users[client_name] = client_sock
             print(f"User {client_name} logged in")
 
             # 广播登录
-            await self.broadcast(client_name, data, loop)
-            # 发送在线列表给自己
-            # await self.get_allusers(client_sock, loop, client_name)
+            await self.broadcast(client_name, msg)
 
         elif msg_type == 'logout':
             if current_user_name:
-                await self.broadcast(current_user_name, data, loop)
+                await self.broadcast(current_user_name, msg)
 
         elif msg_type in ['text', 'image', 'file_header', 'file_chunk', 'file_finish']:
-            recipient_id = data['to_id']
-            await self.send_to_user(recipient_id, data, loop)
+            recipient_id = msg['to_id']
+            if msg['private']:
+                await self.send_to_user(recipient_id, msg)
+            else:
+                if recipient_id in self.rooms.keys():
+                    for user in self.rooms[recipient_id].users:
+                        if user != msg['from_id']:
+                            await self.send_to_user(user, msg)
+
+        elif msg_type in 'create_room':
+            room_name = msg['content']
+            users = msg['to_id']
+            creator = msg['from_id']
+            room = Room(room_name, creator)
+            self.rooms[room_name] = room
+            for user in users:
+                await self.join_room(room_name, user, creator)
 
     async def run(self):
-        loop = asyncio.get_running_loop()
+        self.loop = asyncio.get_running_loop()
         print("Server started on port 8888...")
         while True:
-            client_sock, addr = await loop.sock_accept(self.server)
+            client_sock, addr = await self.loop.sock_accept(self.server)
             print(f"Connection from {addr}")
             client_sock.setblocking(False)
-            await self.get_allusers(client_sock, loop, '')
-            loop.create_task(self.handle(client_sock, loop))
+            await self.get_allusers(client_sock, '')
+            self.loop.create_task(self.handle(client_sock))
 
 
 if __name__ == '__main__':

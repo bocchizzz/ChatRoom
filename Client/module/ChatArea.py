@@ -12,14 +12,15 @@ class ChatArea(QWidget):
     """
     右侧聊天区域：包含消息列表和输入框
     """
-    sent = Signal(str, str, str)  # content, to_id, type
+    sent = Signal(str, str, str, bool)  # content, to_id, type, is_private
 
-    def __init__(self, chat_name, other_avatar, self_avatar, parent=None):
+    def __init__(self, chat_name, other_avatar, self_avatar, isroom=False, parent=None):
         super().__init__(parent)
         self.chat_name = chat_name
         self.chat_type = ''
         self.other_avatar = other_avatar
         self.self_avatar = self_avatar
+        self.isroom = isroom
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -101,9 +102,10 @@ class ChatArea(QWidget):
 
         self.layout.addWidget(self.input_container)
 
-    def add_message(self, content, is_me=True, msg_type='text'):
+    def add_message(self, content, sender_name='', is_me=True, msg_type='text'):
         item = QListWidgetItem()
-        widget = MessageBubble(content, self.self_avatar if is_me else self.other_avatar, is_me, msg_type)
+        widget = MessageBubble(content, self.self_avatar if is_me else self.other_avatar,
+                               sender_name, is_me, self.isroom, msg_type)
 
         item.setSizeHint(QSize(0, widget.sizeHint().height() + 4))
         self.message_list.addItem(item)
@@ -118,7 +120,7 @@ class ChatArea(QWidget):
         if text:
             self.add_message(text, is_me=True)
             self.text_edit.clear()
-            self.sent.emit(text, self.chat_name, 'text')
+            self.sent.emit(text, self.chat_name, 'text', self.isroom)
 
     def select_image(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -134,7 +136,7 @@ class ChatArea(QWidget):
             self.add_message(base64_str, is_me=True, msg_type='image')
 
             # 发送信号MainWindow -> Client -> Listener
-            self.sent.emit(base64_str, self.chat_name, 'image')
+            self.sent.emit(base64_str, self.chat_name, 'image', self.isroom)
 
     def select_file(self):
         """选择并发送文件"""
@@ -144,4 +146,4 @@ class ChatArea(QWidget):
         if file_path:
             filename = os.path.basename(file_path)
             self.add_message(f"正在发送: {filename}", is_me=True, msg_type='file')
-            self.sent.emit(file_path, self.chat_name, 'file')
+            self.sent.emit(file_path, self.chat_name, 'file', self.isroom)
